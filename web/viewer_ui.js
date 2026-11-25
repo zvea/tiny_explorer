@@ -135,6 +135,7 @@ export function initViewerUI(viewer) {
     bindTreeInspectorUI(viewer);
     bindLayerControls(viewer);
     bindKeyboardHotkeys(viewer);
+    bindSpeedOverlay(viewer);
     // The worker now drives VGA updates and ray properties, remove UI driving
     viewer.onUpdateCircuit = (wireData) => {
         updateCircuitMonitorState(viewer, wireData);
@@ -382,7 +383,10 @@ export function bindKeyboardHotkeys(viewer) {
         }
         
         // Don't trigger hotkeys if the user is typing in a field
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+        // (A slider keeps focus after a drag, but takes no typing.)
+        const typing = (e.target.tagName === 'INPUT' && e.target.type !== 'range') ||
+            e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA';
+        if (typing) return;
 
         if (e.key.toLowerCase() === 'c') {
             const clkWire = viewer.wireNames.find(w => /^clk$/i.test(w.name));
@@ -397,7 +401,61 @@ export function bindKeyboardHotkeys(viewer) {
         if (e.key.toLowerCase() === 'p') {
             if (btnPlayAnim) btnPlayAnim.click();
         }
+        if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            toggleSpeedOverlay();
+        }
     });
+}
+
+// MARK: - Speed Readout
+// Simulated clocks per second, from the clock counts in the worker's updates: over the last
+// second up to the latest clock, or longer (up to 10 s) while fewer than 10 clocks fall in it,
+// so slow speeds read steadily. Hidden until toggled with F.
+let speedOverlayRefresh = null;
+
+function toggleSpeedOverlay() {
+    const overlay = $('speedOverlay');
+    if (!overlay) return;
+    overlay.classList.toggle('hidden');
+    speedOverlayRefresh?.();
+}
+
+export function bindSpeedOverlay(viewer) {
+    const overlay = $('speedOverlay');
+    if (!overlay) return;
+    const samples = [];  // {t: arrival, wt: worker time, count}, the last 10 s
+    viewer.onClockCount = (count, workerTime) => {
+        const t = performance.now();
+        const last = samples[samples.length - 1];
+        // A new design was loaded, or updates resume after a stop or a hidden tab
+        if (last && (count < last.count || t - last.t > 2000)) samples.length = 0;
+        samples.push({ t, wt: workerTime ?? t, count });
+        while (samples.length > 2 && t - samples[0].t > 10000) samples.shift();
+    };
+    speedOverlayRefresh = () => {
+        if (overlay.classList.contains('hidden')) return;
+        let rate = 0;
+        const b = samples[samples.length - 1];
+        if (b && performance.now() - b.t <= 2000) {  // no updates for 2 s: stopped
+            // Measure up to the update where the count last changed (c), from one at least 1 s
+            // and 10 clocks before it (a), or the oldest kept.
+            let ci = samples.length - 1;
+            while (ci > 0 && samples[ci - 1].count === b.count) ci--;
+            const c = samples[ci];
+            let a = null;
+            for (let i = ci - 1; i >= 0; i--) {
+                a = samples[i];
+                if (c.wt - a.wt >= 1000 && c.count - a.count >= 10) break;
+            }
+            if (a && c.wt > a.wt && c.count > a.count) {
+                const r = (c.count - a.count) / ((c.wt - a.wt) / 1000);
+                // No clock for 2 s, or three of the recent gaps between clocks: stopped
+                if (b.wt - c.wt <= Math.max(2000, 3000 / r)) rate = r;
+            }
+        }
+        overlay.textContent = `${Math.round(rate).toLocaleString('en-US')} clocks/s`;
+    };
+    setInterval(speedOverlayRefresh, 250);
 }
 
 // MARK: - Tree Hierarchy UI

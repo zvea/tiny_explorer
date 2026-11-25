@@ -207,6 +207,7 @@ export class CircuitViewer {
         this.onLoaded = null;
         this.onUpdateCircuit = null;
         this.onVgaFrame = null;
+        this.onClockCount = null;
         this.onMetadata = null;
 
         this.simSpeed = 0;
@@ -596,6 +597,9 @@ export class CircuitViewer {
                     this.onUpdateCircuit?.(data.wireData);
                 }
             } else if (data.type === 'simUpdate') {
+                if (data.clockCount !== undefined) {
+                    this.onClockCount?.(data.clockCount, data.clockTime);
+                }
                 if (this.simInputPauseActive) return; // Drop stale incoming frames while freezing for input manipulation
 
                 if (data.wireData) {

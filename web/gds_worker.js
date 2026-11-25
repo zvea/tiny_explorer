@@ -78,6 +78,7 @@ let autoClock = false;
 let lastSimUpdate = 0;
 let lastClkVal = 0;
 let pendingVgaTick = false;
+let clockCount = 0;  // rising edges made by the loop, for the speed readout
 
 const files = new Map();
 
@@ -242,6 +243,7 @@ async function runGdsTask(gdsUrl, pdk, options = {}) {
         clkNetId = -1;
         lastClkVal = 0;
         pendingVgaTick = false;
+        clockCount = 0;
         wireNames.forEach(w => {
             if (/^clk$/i.test(w.name)) clkNetId = w.id;
         });
@@ -339,7 +341,7 @@ function checkClockEdge() {
 }
 
 function sendSimUpdate(forceWireData = false) {
-    const payload = { type: 'simUpdate' };
+    const payload = { type: 'simUpdate', clockCount, clockTime: performance.now() };
     const transferables = [];
     
     if (forceWireData && instance.exports.wasm_wireData_ptr) {
@@ -425,7 +427,7 @@ function simLoop() {
         } else if (autoClock && clkNetId !== -1) {
             const val = getNetValue(clkNetId);
             instance.exports.wasm_circuit_set_input(clkNetId, val ? 0 : 1);
-            if (checkClockEdge()) pendingVgaTick = true;
+            if (checkClockEdge()) { pendingVgaTick = true; clockCount++; }
             
             // If it settled instantly (no logic depth or no feedback)
             if (instance.exports.wasm_circuit_is_settled() && pendingVgaTick) {

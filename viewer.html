@@ -44,6 +44,12 @@
         .flex-between { justify-content: space-between; }
         .flex-wrap { flex-wrap: wrap; }
         .hidden { display: none !important; }
+        #speedOverlay {
+            position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 100;
+            padding: 4px 10px; border-radius: 4px; background: rgba(0, 0, 0, 0.7);
+            color: var(--accent-green); font-family: var(--font-mono); font-size: 14px;
+            pointer-events: none;
+        }
 
         .m-0 { margin: 0 !important; }
         .mb-2 { margin-bottom: 8px !important; }
@@ -497,6 +503,8 @@
         </div>
     </div>
 
+    <div id="speedOverlay" class="hidden"></div>
+
     <div id="vgaMonitor" class="panel">
         <div class="panel-header">
             <span>VGA Monitor</span>
@@ -540,6 +548,7 @@
                 <li><kbd style="color: var(--accent-orange);">Space</kbd>: Step simulation forward</li>
                 <li><kbd style="color: var(--accent-orange);">C</kbd>: Toggle clock signal ('clk')</li>
                 <li><kbd style="color: var(--accent-orange);">P</kbd>: Play / Pause animation sequence</li>
+                <li><kbd style="color: var(--accent-orange);">F</kbd>: Show / hide simulation speed</li>
                 <li><kbd style="color: var(--accent-orange);">↑ / ↓</kbd>: Navigate selected tree list</li>
             </ul>
         </div>
