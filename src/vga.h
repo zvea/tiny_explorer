@@ -66,6 +66,12 @@ struct VGASimulator {
     int ray_x = 0, ray_y = 0;   // beam position in the drawn area; outside it during blanking
     std::vector<uint8_t> vga_buffer;
 
+    // Lines drawn since the last clear_dirty(), so the page copies only those. dirty_full asks
+    // for the whole drawn area, after the buffer was cleared.
+    bool dirty_full = true;
+    int dirty_y0 = 0, dirty_y1 = -1;
+    void clear_dirty() { dirty_full = false; dirty_y0 = 0; dirty_y1 = -1; }
+
     VGASyncInput hsync_in, vsync_in;
     int clocks = 0;            // clocks since the last line sync pulse ended
     int lines = 0;             // line starts since the last frame sync pulse ended
@@ -100,6 +106,7 @@ struct VGASimulator {
         width = std::min(t.h_visible, max_width);
         height = std::min(t.v_visible, max_height);
         std::fill(vga_buffer.begin(), vga_buffer.end(), 0);
+        dirty_full = true;
     }
 
     // Called at each frame start once a whole line and a whole frame have been measured.
@@ -216,6 +223,8 @@ struct VGASimulator {
             vga_buffer[idx + 0] = (r1 * 2 + r0) * 85;
             vga_buffer[idx + 1] = (g1 * 2 + g0) * 85;
             vga_buffer[idx + 2] = (b1 * 2 + b0) * 85;
+            if (dirty_y0 > dirty_y1) dirty_y0 = dirty_y1 = ray_y;
+            else { dirty_y0 = std::min(dirty_y0, ray_y); dirty_y1 = std::max(dirty_y1, ray_y); }
         }
         ++clocks;
     }

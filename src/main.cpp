@@ -14,6 +14,7 @@
 #include "extractor.h"
 #include "fetsim.h"
 #include "vga.h"
+#include "sim_stepper.h"
 
 #ifdef WASM
 #define WASM_EXPORT(name) __attribute__((export_name(name)))
@@ -38,6 +39,7 @@ struct Module {
     CircuitExtractor extractor;
     Circuit & circuit;
     VGASimulator vga;
+    SimStepper stepper;
 
     Module() : circuit(extractor.circuit), vga(circuit) {}
 
@@ -191,6 +193,23 @@ extern "C" {
     WASM_INT_(vga_height, vga.height);
     WASM_INT_(vga_ray_x, vga.ray_x);
     WASM_INT_(vga_ray_y, vga.ray_y);
+    WASM_INT_(vga_dirty_full, vga.dirty_full);
+    WASM_INT_(vga_dirty_y0, vga.dirty_y0);
+    WASM_INT_(vga_dirty_y1, vga.dirty_y1);
+
+    WASM_EXPORT("wasm_vga_clear_dirty")
+    void wasm_vga_clear_dirty() { g_mod()->vga.clear_dirty(); }
+
+    WASM_INT_(sim_clock_count, stepper.clock_count);
+
+    WASM_EXPORT("wasm_sim_set_clock")
+    void wasm_sim_set_clock(int wire) { g_mod()->stepper.set_clock(wire); }
+
+    // Takes up to max_steps simulation steps (see SimStepper); returns how many it took.
+    WASM_EXPORT("wasm_sim_run")
+    int wasm_sim_run(int max_steps, int auto_clock) {
+        return g_mod()->stepper.run(g_mod()->circuit, g_mod()->vga, max_steps, auto_clock != 0);
+    }
 
     WASM_INT_(cell_count, extractor.cells.size());
     WASM_INDEXED_STR_(cell_name, extractor.cells, name);

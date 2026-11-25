@@ -60,19 +60,21 @@ src/main.o: src/main.cpp
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Unit tests (header-only code under test; no gdstk objects needed)
-tests/vga_test: tests/vga_test.cpp src/vga.h
+TESTS = tests/vga_test tests/sim_stepper_test
+
+tests/%: tests/%.cpp src/*.h
 	@echo "  CXX     $<"
 	@$(CXX) $(CXXFLAGS) $< -o $@
 
-test: tests/vga_test
-	@./tests/vga_test
+test: $(TESTS)
+	@for t in $(TESTS); do ./$$t || exit 1; done
 
 
 # Include dependency files
 -include $(DEPS)
 
 clean:
-	@rm -f $(OBJS) $(DEPS) $(TARGETS) tests/vga_test
+	@rm -f $(OBJS) $(DEPS) $(TARGETS) $(TESTS)
 
 	@find . -name "*.o" -delete
 	@find . -name "*.d" -delete

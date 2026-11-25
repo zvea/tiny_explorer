@@ -830,14 +830,15 @@ function updateCircuitMonitorState(viewer, wireData) {
 }
 
 // MARK: - CRT / VGA View
-export function updateVgaMonitor(viewer, {buffer, width, height, rayX, rayY, stride}) {
+// The worker sends only the picture lines drawn since its last update (rows, from line y0;
+// stride pixels per row); the canvas keeps the whole picture between updates.
+export function updateVgaMonitor(viewer, {rows, y0, width, height, rayX, rayY, stride}) {
     const canvas = document.getElementById('vgaCanvas');
     const placeholder = document.getElementById('vgaPlaceholder');
-    if (!canvas || !placeholder) return;
+    if (!canvas || !placeholder || !width || !height) return;
 
-    if (!buffer) return;
-
-    if (canvas.width !== width || canvas.height !== height || placeholder.style.display !== 'none') {
+    const ctx = canvas.getContext('2d');
+    if (canvas.width !== width || canvas.height !== height || !canvas._vgaImage) {
         canvas.width = width;
         canvas.height = height;
         
@@ -850,26 +851,29 @@ export function updateVgaMonitor(viewer, {buffer, width, height, rayX, rayY, str
         
         canvas.classList.remove('hidden');
         placeholder.classList.add('hidden');
+
+        canvas._vgaImage = ctx.createImageData(width, height);
+        canvas._vgaImage.data.fill(255);  // opaque; the colour comes with the first full update
     }
 
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.createImageData(width, height);
-    const data = imageData.data;
-
-    // RGB (with stride) to Canvas (RGBA)
-    const s = stride || width;
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const di = (y * width + x) * 4;
-            const si = (y * s + x) * 3;
-            data[di] = buffer[si];
-            data[di+1] = buffer[si+1];
-            data[di+2] = buffer[si+2];
-            data[di+3] = 255;
+    // RGB rows (with stride) to the canvas image (RGBA)
+    const image = canvas._vgaImage;
+    const data = image.data;
+    if (rows) {
+        const s = stride || width;
+        const lines = Math.min(rows.length / (s * 3), height - y0);
+        for (let r = 0; r < lines; r++) {
+            for (let x = 0; x < width; x++) {
+                const di = ((y0 + r) * width + x) * 4;
+                const si = (r * s + x) * 3;
+                data[di] = rows[si];
+                data[di+1] = rows[si+1];
+                data[di+2] = rows[si+2];
+            }
         }
     }
 
-    ctx.putImageData(imageData, 0, 0);
+    ctx.putImageData(image, 0, 0);
 
     // Draw ray spot
     if (typeof rayX === 'number' && typeof rayY === 'number') {

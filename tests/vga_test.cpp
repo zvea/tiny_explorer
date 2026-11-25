@@ -55,22 +55,27 @@ struct Rig {
         for (int i = 0; i < 8; ++i) circuit.wire_data[i] = bits[i];
     }
 
-    // Drives whole frames, starting where the previous call stopped.
-    void run_frames(const Signal& s, int frames) {
-        for (int f = 0; f < frames; ++f)
-            for (int y = 0; y < s.v.total(); ++y)
-                for (int x = 0; x < s.h.total(); ++x)
-                    for (int k = 0; k < s.clocks_per_pixel; ++k) {
-                        bool visible = x < s.h.visible && y < s.v.visible;
-                        bool hpulse = x >= s.h.visible + s.h.front && x < s.h.visible + s.h.front + s.h.sync;
-                        bool vpulse = y >= s.v.visible + s.v.front && y < s.v.visible + s.v.front + s.v.sync;
-                        // Only a pixel's first clock carries its colour: the model must
-                        // sample that one.
-                        set_outputs(visible ? (k == 0 ? pattern(x, y) : 0) : 0,
-                                    hpulse == s.h_active_high, vpulse == s.v_active_high);
-                        vga.vga_tick();
-                    }
+    // Drives whole lines from the top of the frame (the state after reset), starting where
+    // the previous call stopped.
+    int line = 0;
+    void run_lines(const Signal& s, int lines) {
+        for (int n = 0; n < lines; ++n, line = (line + 1) % s.v.total()) {
+            int y = line;
+            for (int x = 0; x < s.h.total(); ++x)
+                for (int k = 0; k < s.clocks_per_pixel; ++k) {
+                    bool visible = x < s.h.visible && y < s.v.visible;
+                    bool hpulse = x >= s.h.visible + s.h.front && x < s.h.visible + s.h.front + s.h.sync;
+                    bool vpulse = y >= s.v.visible + s.v.front && y < s.v.visible + s.v.front + s.v.sync;
+                    // Only a pixel's first clock carries its colour: the model must
+                    // sample that one.
+                    set_outputs(visible ? (k == 0 ? pattern(x, y) : 0) : 0,
+                                hpulse == s.h_active_high, vpulse == s.v_active_high);
+                    vga.vga_tick();
+                }
+        }
     }
+
+    void run_frames(const Signal& s, int frames) { run_lines(s, frames * s.v.total()); }
 
     int pixel(int x, int y) const {
         const uint8_t* p = &vga.vga_buffer[(y * vga.max_width + x) * 3];
@@ -144,7 +149,27 @@ static void test_unknown_timing() {
     rig.check_picture("unknown timing", s, s.h.total() - h_sync_end, s.v.total() - v_sync_end);
 }
 
+// The model records which lines it drew since the page last fetched them, so the page copies
+// only those; a cleared buffer (a new mode) needs the whole picture.
+static void test_changed_lines() {
+    Rig rig;
+    CHECK(rig.vga.dirty_full, "a fresh buffer is not marked for a full copy");
+    rig.vga.clear_dirty();
+    rig.run_lines(VGA_640x480_60, 3);
+    CHECK(!rig.vga.dirty_full && rig.vga.dirty_y0 == 0 && rig.vga.dirty_y1 == 2,
+          "after three lines: full %d, lines %d..%d, want 0..2",
+          rig.vga.dirty_full, rig.vga.dirty_y0, rig.vga.dirty_y1);
+    rig.vga.clear_dirty();
+    CHECK(rig.vga.dirty_y0 > rig.vga.dirty_y1, "lines still marked after clear_dirty");
+
+    Rig other;
+    other.vga.clear_dirty();
+    other.run_frames(VGA_800x600_72, 3);
+    CHECK(other.vga.dirty_full, "a new mode is not marked for a full copy");
+}
+
 int main() {
+    test_changed_lines();
     test_640x480_active_low();
     test_640x480_active_high();
     test_800x600_72();

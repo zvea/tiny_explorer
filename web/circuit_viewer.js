@@ -216,6 +216,11 @@ export class CircuitViewer {
         this.pendingInputs = [];
         this.workerAckResolve = null;
 
+        // The worker's full-speed loop does not pause by itself in a hidden tab; tell it.
+        document.addEventListener('visibilitychange', () => {
+            this.worker?.postMessage({ type: 'visibility', hidden: document.hidden });
+        });
+
         this.init();
     }
 
@@ -579,6 +584,7 @@ export class CircuitViewer {
 
         if (this.worker) this.worker.terminate();
         this.worker = new Worker("web/gds_worker.js", { type: "module" });
+        this.worker.postMessage({ type: 'visibility', hidden: document.hidden });
 
         this.worker.onmessage = (e) => {
             const data = e.data;
@@ -597,16 +603,19 @@ export class CircuitViewer {
                     this.onUpdateCircuit?.(data.wireData);
                 }
             } else if (data.type === 'simUpdate') {
+                // The VGA part carries only the lines drawn since the last update, so it is never
+                // dropped; while freezing for input manipulation, stale wire states are.
+                if (data.vga) {
+                    this.onVgaFrame?.(data.vga);
+                }
                 if (data.clockCount !== undefined) {
                     this.onClockCount?.(data.clockCount, data.clockTime);
                 }
-                if (this.simInputPauseActive) return; // Drop stale incoming frames while freezing for input manipulation
+                if (this.simInputPauseActive) return;
 
                 if (data.wireData) {
                     this.updateNetStatesFromWireData(data.wireData, data.isSettled);
                     this.onUpdateCircuit?.(data.wireData);
-                }                if (data.vga) {
-                    this.onVgaFrame?.(data.vga);
                 }
             } else if (data.type === 'ack_response') {
                 if (this.workerAckResolve) {
@@ -834,6 +843,17 @@ export class CircuitViewer {
         this.simSpeed = speed;
         this.autoClock = autoClock;
         if (!this.worker) return;
+
+        // At full speed the worker posts its state when asked, once per displayed frame
+        if (speed === 100 && !this.frameRequestsRunning) {
+            this.frameRequestsRunning = true;
+            const requestFrame = () => {
+                if (this.simSpeed !== 100) { this.frameRequestsRunning = false; return; }
+                this.worker?.postMessage({ type: 'frame' });
+                requestAnimationFrame(requestFrame);
+            };
+            requestAnimationFrame(requestFrame);
+        }
         
         if (!this.simInputPauseActive) {
             this.worker.postMessage({ type: 'sim_config', speed, autoClock });

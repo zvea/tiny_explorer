@@ -2,6 +2,7 @@
 /explorer
 /fetsim
 /tests/vga_test
+/tests/sim_stepper_test
 
 # Processing logs and reports
 /logs/

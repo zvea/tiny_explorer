@@ -76,9 +76,6 @@ let simRunning = false;
 let simSpeed = 0;
 let autoClock = false;
 let lastSimUpdate = 0;
-let lastClkVal = 0;
-let pendingVgaTick = false;
-let clockCount = 0;  // rising edges made by the loop, for the speed readout
 
 const files = new Map();
 
@@ -241,12 +238,10 @@ async function runGdsTask(gdsUrl, pdk, options = {}) {
 
         const wireNames = getWireNames();
         clkNetId = -1;
-        lastClkVal = 0;
-        pendingVgaTick = false;
-        clockCount = 0;
         wireNames.forEach(w => {
             if (/^clk$/i.test(w.name)) clkNetId = w.id;
         });
+        instance.exports.wasm_sim_set_clock(clkNetId);
 
         postMessage({ type: 'done', stats, file: gdsUrl, pdk, wireNames }, transferables);
 
@@ -306,6 +301,15 @@ onmessage = function(e) {
                 sendSimUpdate(true); // Final sync when stopping
             }
         }
+    } else if (e.data.type === 'frame') {
+        frameRequested = true;
+    } else if (e.data.type === 'visibility') {
+        pageHidden = e.data.hidden;
+        if (!pageHidden && parkedCallback) {
+            const cb = parkedCallback;
+            parkedCallback = null;
+            scheduleNext(cb);
+        }
     } else if (e.data.type === 'ack_request') {
         postMessage({ type: 'ack_response' });
     }
@@ -316,32 +320,40 @@ let waveAccumulator = 0;
 let lastSimLoopTime = 0;
 let wireDataNeedsClear = false;
 
+// At full speed the loop runs again as soon as it yields (a MessageChannel message, which
+// browsers do not throttle like timers). Slower speeds, and any speed while the page is hidden,
+// follow the display's frames, which browsers pause for hidden pages.
+let pageHidden = false;
+let frameRequested = false;  // the page is ready to show a new state (full speed only)
+let unsentWork = false;      // simulated since the last update was posted (full speed only)
+let parkedCallback = null;  // the loop, parked while hidden where there is no requestAnimationFrame
+const loopChannel = new MessageChannel();
+let loopCallback = null;
+loopChannel.port1.onmessage = () => {
+    const cb = loopCallback;
+    loopCallback = null;
+    if (cb) cb();
+};
+
 function scheduleNext(cb) {
-    if (typeof requestAnimationFrame !== 'undefined') {
+    if (simSpeed === 100 && !pageHidden) {
+        loopCallback = cb;
+        loopChannel.port2.postMessage(0);
+    } else if (typeof requestAnimationFrame !== 'undefined') {
         requestAnimationFrame(cb);
+    } else if (pageHidden) {
+        parkedCallback = cb;
     } else {
         setTimeout(cb, 0);
     }
 }
 
-function getNetValue(netId) {
-    if (netId === -1 || !instance?.exports?.wasm_wireData_ptr) return 0;
-    const wireData = new Uint8Array(instance.exports.memory.buffer, instance.exports.wasm_wireData_ptr(), instance.exports.wasm_wireData_size());
-    return wireData[netId] & 1;
-}
-
-function checkClockEdge() {
-    const clkVal = getNetValue(clkNetId);
-    let edgeDetected = false;
-    if (clkVal === 1 && lastClkVal === 0) {
-        edgeDetected = true;
-    }
-    lastClkVal = clkVal;
-    return edgeDetected;
-}
-
 function sendSimUpdate(forceWireData = false) {
-    const payload = { type: 'simUpdate', clockCount, clockTime: performance.now() };
+    const payload = { type: 'simUpdate' };
+    if (instance.exports.wasm_sim_clock_count) {
+        payload.clockCount = instance.exports.wasm_sim_clock_count() >>> 0;
+        payload.clockTime = performance.now();  // timed here: the page may handle it late
+    }
     const transferables = [];
     
     if (forceWireData && instance.exports.wasm_wireData_ptr) {
@@ -354,24 +366,44 @@ function sendSimUpdate(forceWireData = false) {
     }
     
     if (instance.exports.wasm_vga_buffer_ptr) {
+        const ex = instance.exports;
+        const stride = ex.wasm_vga_stride();
         const vga = {
-            stride: instance.exports.wasm_vga_stride(),
-            width: instance.exports.wasm_vga_width(),
-            height: instance.exports.wasm_vga_height(),
-            rayX: instance.exports.wasm_vga_ray_x(),
-            rayY: instance.exports.wasm_vga_ray_y(),
+            stride,
+            width: ex.wasm_vga_width(),
+            height: ex.wasm_vga_height(),
+            rayX: ex.wasm_vga_ray_x(),
+            rayY: ex.wasm_vga_ray_y(),
         };
-        const vgaPtr = instance.exports.wasm_vga_buffer_ptr();
-        if (vgaPtr) {
-            const data = new Uint8Array(instance.exports.memory.buffer, vgaPtr, instance.exports.wasm_vga_buffer_size()).slice();
-            vga.buffer = data;
-            transferables.push(data.buffer);
+        // Only the lines drawn since the last update; all of them after the buffer was cleared.
+        const full = ex.wasm_vga_dirty_full();
+        const y0 = full ? 0 : ex.wasm_vga_dirty_y0();
+        const y1 = full ? vga.height - 1 : ex.wasm_vga_dirty_y1();
+        ex.wasm_vga_clear_dirty();
+        if (y1 >= y0) {
+            const rows = new Uint8Array(ex.memory.buffer, ex.wasm_vga_buffer_ptr() + y0 * stride * 3,
+                                        (y1 - y0 + 1) * stride * 3).slice();
+            vga.rows = rows;
+            vga.y0 = y0;
+            transferables.push(rows.buffer);
         }
         payload.vga = vga;
     }
     
     postMessage(payload, transferables);
     lastSimUpdate = performance.now();
+}
+
+// Steps per call into WASM, adapted so that a call takes about CALL_TARGET_MS on the loaded
+// design and this machine: a step's cost varies with the design's size and activity. The
+// target sits well under the loop's 2 ms budget at slow speeds, and far above a call's overhead.
+const CALL_TARGET_MS = 1;
+let stepsPerCall = 16;
+
+function adaptStepsPerCall(ms) {
+    // At most doubling per call, as coarse timers can read 0 ms.
+    const factor = ms > 0 ? Math.min(2, CALL_TARGET_MS / ms) : 2;
+    stepsPerCall = Math.max(1, Math.min(1 << 20, Math.round(stepsPerCall * factor)));
 }
 
 function simLoop() {
@@ -384,7 +416,8 @@ function simLoop() {
 
     const now = performance.now();
     const isMax = simSpeed === 100;
-    const timeLimit = isMax ? (now + 14) : (now + 2); // Spend up to 14ms (max) or 2ms (throttled)
+    // Work in short slices, so that at full speed a frame the page asks for is answered promptly.
+    const timeLimit = now + 2;
     
     let iterCount = 0;
     
@@ -410,35 +443,17 @@ function simLoop() {
     
     lastSimLoopTime = now;
 
+    // Steps (settling waves, or clock toggles once settled) run in WASM, a chunk per call,
+    // with the time checked between chunks.
     let didWork = false;
     while (iterCount > 0 && performance.now() < timeLimit) {
-        let isSettled = instance.exports.wasm_circuit_is_settled();
-        
-        if (!isSettled) {
-            instance.exports.wasm_circuit_run_wave();
-            if (instance.exports.wasm_circuit_is_settled()) {
-                if (pendingVgaTick) {
-                    if (instance.exports.wasm_vga_tick) instance.exports.wasm_vga_tick(1);
-                    pendingVgaTick = false;
-                }
-            }
-            didWork = true;
-            iterCount--;
-        } else if (autoClock && clkNetId !== -1) {
-            const val = getNetValue(clkNetId);
-            instance.exports.wasm_circuit_set_input(clkNetId, val ? 0 : 1);
-            if (checkClockEdge()) { pendingVgaTick = true; clockCount++; }
-            
-            // If it settled instantly (no logic depth or no feedback)
-            if (instance.exports.wasm_circuit_is_settled() && pendingVgaTick) {
-                if (instance.exports.wasm_vga_tick) instance.exports.wasm_vga_tick(1);
-                pendingVgaTick = false;
-            }
-            didWork = true;
-            iterCount--;
-        } else {
-            break; // Settled and no edge to trigger
-        }
+        const asked = Math.min(iterCount, stepsPerCall);
+        const callStart = performance.now();
+        const done = instance.exports.wasm_sim_run(asked, autoClock ? 1 : 0);
+        if (done === 0) break; // Settled and no clock to toggle
+        if (asked === stepsPerCall && done === asked) adaptStepsPerCall(performance.now() - callStart);
+        didWork = true;
+        iterCount -= done;
     }
     
     const forceResync = (now - lastSimUpdate) > 100;
@@ -454,7 +469,15 @@ function simLoop() {
         wireDataNeedsClear = false;
     }
     
-    if (didWork || forceResync) {
+    if (isMax) {
+        // Once per frame the page displays, in step with it
+        if (didWork) unsentWork = true;
+        if (frameRequested && (unsentWork || forceResync)) {
+            sendSimUpdate(sendWireData || unsentWork);
+            frameRequested = false;
+            unsentWork = false;
+        }
+    } else if (didWork || forceResync) {
         // limit UI updates to ~60fps (16ms)
         // BUT: If the circuit is settled and we just did work, this is a 'final' state, send it immediately
         if ((now - lastSimUpdate) >= 16 || (isSettled && didWork)) {
