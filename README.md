@@ -37,7 +37,7 @@ This project serves as a major upgrade to the [original TT09 WebGL GDS Viewer](h
 
 ### Prerequisites
 - **For Native Build:** `clang` or `gcc` with C++20 support, `make`.
-- **For WebAssembly Build:** `zig` (version 0.12 or newer recommended) and `bash`.
+- **For WebAssembly Build:** `zig` 0.14.x or 0.15.x, and `bash`.
 - **Git Submodules:** Ensure all dependencies inside `vendor/` are initialized before building:
   ```bash
   git submodule update --init --recursive
