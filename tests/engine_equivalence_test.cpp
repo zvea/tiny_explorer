@@ -1,5 +1,6 @@
-// Holds the switch-level engine (src/fetsim.h) to a frozen copy of its original version
-// (tests/reference/fetsim_reference.h), so that changes made for speed cannot change results.
+// Holds the switch-level engine (src/fetsim.h) to a frozen copy of its original version, with
+// the corrections listed there (tests/reference/fetsim_reference.h), so that changes made for
+// speed cannot change results.
 //
 // Random transistor circuits, shorts, floating wires and feedback included, are built with both
 // engines and driven alike by random input toggles. After every wave the two must agree on

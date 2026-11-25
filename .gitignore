@@ -4,6 +4,7 @@
 /tests/vga_test
 /tests/sim_stepper_test
 /tests/engine_equivalence_test
+/tests/circuit_init_test
 
 # Processing logs and reports
 /logs/

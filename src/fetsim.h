@@ -226,8 +226,12 @@ struct Circuit {
                 for (int j = 0; j < vn; j++) {
                     uint32_t w = visited_ptr[j];
                     uint8_t old = s[w];
-                    
-                    s[w] = (old & ~(S_VISITED | V_MASK)) | S_INIT | (has_driven ? val : (old & V_MASK));
+                    uint8_t v = has_driven ? val : (old & V_MASK);
+                    s[w] = (old & ~(S_VISITED | V_MASK)) | S_INIT | v;
+                    // This wire may already have a value from an earlier group. If this group
+                    // changes it, the wires it switches were resolved from the old value.
+                    // Queue them to be resolved again.
+                    if ((old & S_INIT) && v != (old & V_MASK)) trigger_gate(w);
 
                     if (depends_on_uninit) {
                         if (!(s[w] & S_DIRTY)) {

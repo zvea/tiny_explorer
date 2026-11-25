@@ -1,6 +1,12 @@
 // A frozen copy of the switch-level engine (src/fetsim.h as of commit 522edfc), the reference
-// that tests/engine_equivalence_test.cpp holds the current engine to. Never edit the code below;
-// only its wrapping in namespace reference differs from the original.
+// that tests/engine_equivalence_test.cpp holds the current engine to. Changes made for speed
+// must leave results unchanged, so they never go in here.
+//
+// It differs from that commit in two ways. It is wrapped in namespace reference. It has the
+// corrections listed below, each also made in src/fetsim.h. Edit it only to correct behaviour,
+// and make the same change in src/fetsim.h.
+//   - init(): when a later group changes a wire's value, the wires it switches are queued to be
+//     resolved again (tests/circuit_init_test.cpp).
 #pragma once
 
 #include <algorithm>
@@ -228,8 +234,12 @@ struct Circuit {
                 for (int j = 0; j < vn; j++) {
                     uint32_t w = visited_ptr[j];
                     uint8_t old = s[w];
-                    
-                    s[w] = (old & ~(S_VISITED | V_MASK)) | S_INIT | (has_driven ? val : (old & V_MASK));
+                    uint8_t v = has_driven ? val : (old & V_MASK);
+                    s[w] = (old & ~(S_VISITED | V_MASK)) | S_INIT | v;
+                    // This wire may already have a value from an earlier group. If this group
+                    // changes it, the wires it switches were resolved from the old value.
+                    // Queue them to be resolved again.
+                    if ((old & S_INIT) && v != (old & V_MASK)) trigger_gate(w);
 
                     if (depends_on_uninit) {
                         if (!(s[w] & S_DIRTY)) {
