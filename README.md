@@ -63,6 +63,11 @@ To clean build artifacts:
 ```bash
 make clean
 ```
+To run the unit tests:
+```bash
+make test
+```
+The Makefile uses Clang; to use GCC, add `CC=gcc CXX=g++` to either command.
 
 ### 3. Running the Web Application Locally
 Once `explorer.wasm` is built, serve the repository root using any static local HTTP server (required to allow Web Worker and WASM file loading):

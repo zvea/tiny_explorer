@@ -34,7 +34,7 @@ TARGETS = explorer
 
 
 # Rules
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGETS)
 
@@ -59,11 +59,20 @@ src/main.o: src/main.cpp
 	@echo "  CXX     $<"
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
+# Unit tests (header-only code under test; no gdstk objects needed)
+tests/vga_test: tests/vga_test.cpp src/vga.h
+	@echo "  CXX     $<"
+	@$(CXX) $(CXXFLAGS) $< -o $@
+
+test: tests/vga_test
+	@./tests/vga_test
+
+
 # Include dependency files
 -include $(DEPS)
 
 clean:
-	@rm -f $(OBJS) $(DEPS) $(TARGETS)
+	@rm -f $(OBJS) $(DEPS) $(TARGETS) tests/vga_test
 
 	@find . -name "*.o" -delete
 	@find . -name "*.d" -delete

@@ -1,6 +1,7 @@
 # Native binaries
 /explorer
 /fetsim
+/tests/vga_test
 
 # Processing logs and reports
 /logs/
