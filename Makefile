@@ -60,9 +60,9 @@ src/main.o: src/main.cpp
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Unit tests (header-only code under test; no gdstk objects needed)
-TESTS = tests/vga_test tests/sim_stepper_test
+TESTS = tests/vga_test tests/sim_stepper_test tests/engine_equivalence_test
 
-tests/%: tests/%.cpp src/*.h
+tests/%: tests/%.cpp src/*.h tests/reference/*.h
 	@echo "  CXX     $<"
 	@$(CXX) $(CXXFLAGS) $< -o $@
 

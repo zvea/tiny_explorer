@@ -27,12 +27,15 @@ struct Queue {
         data[tail] = w;
         size_t m = data.size() - 1;
         tail = (tail + 1) & m;
-        if (tail == head) {
-            std::vector<uint32_t> next(data.size() * 2);
-            for (size_t i = 0; i < data.size(); i++) next[i] = data[(head + i) & m];
-            head = 0; tail = data.size();
-            data = std::move(next);
-        }
+        if (tail == head) grow();
+    }
+    // Doubles the ring when full; kept out of push_back so that push_back can be inlined.
+    [[gnu::noinline]] void grow() {
+        size_t m = data.size() - 1;
+        std::vector<uint32_t> next(data.size() * 2);
+        for (size_t i = 0; i < data.size(); i++) next[i] = data[(head + i) & m];
+        head = 0; tail = data.size();
+        data = std::move(next);
     }
     uint32_t pop_front() {
         uint32_t r = data[head];
