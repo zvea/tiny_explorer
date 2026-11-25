@@ -1,0 +1,52 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+      - name: Unit tests
+        run: make test CC=gcc CXX=g++
+      - name: Committed WASM matches the source
+        run: |
+          zig build -Dtarget=wasm32-wasi --release=fast
+          cmp zig-out/bin/explorer.wasm web/explorer.wasm
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+      - name: Gather the site
+        run: |
+          mkdir _site _site/vendor
+          cp index.html viewer.html bench.html LICENSE _site/
+          cp -r web gallery _site/
+          cp vendor/*.js vendor/*.wasm _site/vendor/
+      - uses: actions/upload-pages-artifact@v5
+      - id: deployment
+        uses: actions/deploy-pages@v5
